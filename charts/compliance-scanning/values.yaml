@@ -34,7 +34,8 @@ compliance:
   resultsViewer:
     enabled: true
     name: compliance-results-viewer
-    image: "registry.redhat.io/rhel8/toolbox:latest"
+    # TBD  make this one of the utility container images from VP team for performing the oscap operations on results
+    image: "registry.access.redhat.com/ubi9/ubi:latest"
     # Mount path for scan results
     mountPath: "/compliance-results"
   # Remediation job configuration
@@ -42,7 +43,7 @@ compliance:
     # Job name
     name: compliance-remediation-job
     # Container image with kubectl and jq
-    image: "registry.redhat.io/ubi8/ubi:latest"
+    image: "registry.access.redhat.com/ubi9/ubi:latest"
     # Service account configuration
     serviceAccount:
       name: compliance-remediation-sa
