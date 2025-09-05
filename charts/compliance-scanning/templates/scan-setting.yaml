@@ -15,6 +15,9 @@ autoUpdateRemediations: true
 {{- if .Values.compliance.scanSetting.schedule }}
 schedule: {{ .Values.compliance.scanSetting.schedule | quote }}
 {{- end }}
+roles:
+  master
+  worker
 # Scanner pod tolerations to run on all nodes including masters
 scanTolerations:
   {{- toYaml .Values.compliance.scanSetting.scanTolerations | nindent 4 }}
