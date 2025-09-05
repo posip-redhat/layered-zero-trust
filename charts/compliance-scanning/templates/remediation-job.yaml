@@ -1,0 +1,203 @@
+# ServiceAccount for the remediation job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.compliance.remediationJob.serviceAccount.name }}
+  namespace: openshift-compliance
+  annotations:
+    argocd.argoproj.io/sync-wave: '0'
+  labels:
+    app.kubernetes.io/component: compliance-remediation-job
+---
+# ClusterRole with permissions to manage compliance resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.compliance.remediationJob.clusterRole.name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: '0'
+  labels:
+    app.kubernetes.io/component: compliance-remediation-job
+rules:
+- apiGroups: ["compliance.openshift.io"]
+  resources: ["compliancescans"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["compliance.openshift.io"]
+  resources: ["complianceremediations"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+# ClusterRoleBinding to bind the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.compliance.remediationJob.clusterRoleBinding.name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: '0'
+  labels:
+    app.kubernetes.io/component: compliance-remediation-job
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.compliance.remediationJob.serviceAccount.name }}
+  namespace: openshift-compliance
+roleRef:
+  kind: ClusterRole
+  name: {{ .Values.compliance.remediationJob.clusterRole.name }}
+  apiGroup: rbac.authorization.k8s.io
+---
+# Job to wait for scan completion and apply remediations
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.compliance.remediationJob.name }}
+  namespace: openshift-compliance
+  annotations:
+    argocd.argoproj.io/sync-wave: '10'
+  labels:
+    app.kubernetes.io/component: compliance-remediation-job
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: compliance-remediation-job
+    spec:
+      serviceAccountName: {{ .Values.compliance.remediationJob.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+      - name: remediation-applier
+        image: {{ .Values.compliance.remediationJob.image }}
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Installing required tools..."
+          
+          # Install kubectl and jq
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          mv kubectl /usr/local/bin/
+          
+          microdnf install -y jq || yum install -y jq || (echo "Installing jq manually..." && \
+            curl -L https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o /usr/local/bin/jq && \
+            chmod +x /usr/local/bin/jq)
+          
+          echo "Tools installed successfully."
+          echo "Starting compliance remediation job..."
+          echo "Scan Setting Binding: {{ .Values.compliance.scanSettingBinding.name }}"
+          echo "Profile: {{ .Values.compliance.scanSettingBinding.profile }}"
+          
+          # The ComplianceScan name is typically generated from the binding name and profile
+          # Format: <binding-name>-<profile-name>
+          SCAN_NAME="{{ .Values.compliance.scanSettingBinding.name }}-{{ .Values.compliance.scanSettingBinding.profile }}"
+          NAMESPACE="openshift-compliance"
+          
+          echo "Waiting for ComplianceScan: $SCAN_NAME to complete..."
+          
+          # Wait for the scan to exist first
+          max_wait_for_scan=600  # 10 minutes
+          wait_time=0
+          
+          while ! kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" >/dev/null 2>&1; do
+            if [ $wait_time -ge $max_wait_for_scan ]; then
+              echo "ERROR: ComplianceScan $SCAN_NAME not found after ${max_wait_for_scan}s"
+              exit 1
+            fi
+            echo "Waiting for ComplianceScan $SCAN_NAME to be created... (${wait_time}s elapsed)"
+            sleep 10
+            wait_time=$((wait_time + 10))
+          done
+          
+          echo "ComplianceScan $SCAN_NAME found. Waiting for completion..."
+          
+          # Wait for the scan to complete
+          max_wait=7200  # 2 hours
+          wait_time=0
+          
+          while true; do
+            # Get the scan phase/status
+            PHASE=$(kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+            
+            if [ "$PHASE" = "DONE" ]; then
+              echo "ComplianceScan $SCAN_NAME completed successfully!"
+              break
+            elif [ "$PHASE" = "ERROR" ] || [ "$PHASE" = "FAILED" ]; then
+              echo "ERROR: ComplianceScan $SCAN_NAME failed with phase: $PHASE"
+              exit 1
+            elif [ -z "$PHASE" ]; then
+              echo "ComplianceScan $SCAN_NAME phase is empty, waiting..."
+            else
+              echo "ComplianceScan $SCAN_NAME is in phase: $PHASE (waiting...)"
+            fi
+            
+            if [ $wait_time -ge $max_wait ]; then
+              echo "ERROR: ComplianceScan $SCAN_NAME did not complete within ${max_wait}s"
+              exit 1
+            fi
+            
+            sleep 30
+            wait_time=$((wait_time + 30))
+          done
+          
+          echo "Scan completed. Looking for pending ComplianceRemediations..."
+          
+          # Get all ComplianceRemediation objects with state=Pending and spec.apply=false
+          PENDING_REMEDIATIONS=$(kubectl get complianceremediations -n "$NAMESPACE" -o json | \
+            jq -r '.items[] | select(.status.applicationState == "Pending" and .spec.apply == false) | .metadata.name')
+          
+          if [ -z "$PENDING_REMEDIATIONS" ]; then
+            echo "No pending ComplianceRemediations found with spec.apply=false"
+            exit 0
+          fi
+          
+          echo "Found pending ComplianceRemediations to apply:"
+          echo "$PENDING_REMEDIATIONS"
+          
+          # Apply each remediation by setting spec.apply to true
+          APPLIED_COUNT=0
+          for REMEDIATION in $PENDING_REMEDIATIONS; do
+            echo "Applying remediation: $REMEDIATION"
+            
+            if kubectl patch complianceremediation "$REMEDIATION" -n "$NAMESPACE" \
+               --type='merge' \
+               --patch='{"spec": {"apply": true}}'; then
+              echo "Successfully applied remediation: $REMEDIATION"
+              APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            else
+              echo "ERROR: Failed to apply remediation: $REMEDIATION"
+            fi
+          done
+          
+          echo "Remediation job completed. Applied $APPLIED_COUNT remediations."
+          
+          # Create an event to record the action
+          kubectl create event \
+            --namespace="$NAMESPACE" \
+            --type=Normal \
+            --reason=RemediationApplied \
+            --message="Applied $APPLIED_COUNT ComplianceRemediations after scan completion" \
+            --for="job/{{ .Values.compliance.remediationJob.name }}" || true
+        env:
+        - name: KUBECONFIG
+          value: /var/run/secrets/kubernetes.io/serviceaccount/token
+        resources:
+          {{- toYaml .Values.compliance.remediationJob.resources | nindent 10 }}
+        {{- if .Values.compliance.remediationJob.securityContext }}
+        securityContext:
+          {{- toYaml .Values.compliance.remediationJob.securityContext | nindent 10 }}
+        {{- end }}
+      {{- if .Values.compliance.remediationJob.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.compliance.remediationJob.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.compliance.remediationJob.tolerations }}
+      tolerations:
+        {{- toYaml .Values.compliance.remediationJob.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.compliance.remediationJob.affinity }}
+      affinity:
+        {{- toYaml .Values.compliance.remediationJob.affinity | nindent 8 }}
+      {{- end }}

@@ -37,3 +37,44 @@ compliance:
     image: "registry.redhat.io/rhel8/toolbox:latest"
     # Mount path for scan results
     mountPath: "/compliance-results"
+  # Remediation job configuration
+  remediationJob:
+    # Job name
+    name: compliance-remediation-job
+    # Container image with kubectl and jq
+    image: "registry.redhat.io/ubi8/ubi:latest"
+    # Service account configuration
+    serviceAccount:
+      name: compliance-remediation-sa
+    # RBAC configuration
+    clusterRole:
+      name: compliance-remediation-role
+    clusterRoleBinding:
+      name: compliance-remediation-binding
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    # Security context
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+        add:
+        - NET_BIND_SERVICE
+      readOnlyRootFilesystem: false
+      seccompProfile:
+        type: RuntimeDefault
+    # Node selector (optional)
+    nodeSelector: {}
+    # Tolerations (optional)
+    tolerations: []
+    # Affinity (optional)
+    affinity: {}
