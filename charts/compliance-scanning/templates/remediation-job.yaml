@@ -79,8 +79,8 @@ spec:
           echo "Profile: {{ .Values.compliance.scanSettingBinding.profile }}"
           
           # The ComplianceScan name is typically generated from the binding name and profile
-          # Format: <binding-name>-<profile-name>
-          SCAN_NAME="{{ .Values.compliance.scanSettingBinding.name }}-{{ .Values.compliance.scanSettingBinding.profile }}"
+          # Format: <profile-name>-<role>
+          SCAN_NAME="{{ .Values.compliance.scanSettingBinding.profile }}-worker"
           NAMESPACE="openshift-compliance"
           
           echo "Waiting for ComplianceScan: $SCAN_NAME to complete..."
