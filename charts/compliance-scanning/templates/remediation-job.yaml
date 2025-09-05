@@ -89,7 +89,7 @@ spec:
           max_wait_for_scan=600  # 10 minutes
           wait_time=0
           
-          while $(kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" -o jsonpath='{..status.conditions[?(@.type=="Ready")].status}') != "True"; do
+          while [[ $(kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" -o jsonpath='{..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do
             if [ $wait_time -ge $max_wait_for_scan ]; then
               echo "ERROR: ComplianceScan $SCAN_NAME not found after ${max_wait_for_scan}s"
               exit 1
@@ -107,7 +107,7 @@ spec:
           
           while true; do
             # Get the scan phase/status
-            PHASE=$(kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+            PHASE=$(kubectl get compliancescan "$SCAN_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}')
             
             if [ "$PHASE" = "DONE" ]; then
               echo "ComplianceScan $SCAN_NAME completed successfully!"
