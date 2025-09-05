@@ -43,7 +43,7 @@ compliance:
     # Job name
     name: compliance-remediation-job
     # Container image with kubectl and jq
-    image: "registry.access.redhat.com/ubi9/ubi:latest"
+    image: "quay.io/validatedpatterns/imperative-container:v1"
     # Service account configuration
     serviceAccount:
       name: compliance-remediation-sa
