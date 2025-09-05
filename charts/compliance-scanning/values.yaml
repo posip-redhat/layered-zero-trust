@@ -43,7 +43,7 @@ compliance:
     # Job name
     name: compliance-remediation-job
     # Container image with kubectl and jq
-    image: "quay.io/validatedpatterns/imperative-container:v1"
+    image: "quay.io/hybridcloudpatterns/imperative-container:v1"
     # Service account configuration
     serviceAccount:
       name: compliance-remediation-sa
