@@ -1,5 +1,5 @@
 apiVersion: v2
-description: Deploys resources for cluster hardening
+description: compliance-scanning performs hardening of OCP cluster vis predefiend profile(s)
 keywords:
   - pattern
   - compliance
