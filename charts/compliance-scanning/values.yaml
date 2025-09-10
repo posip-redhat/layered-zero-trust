@@ -35,6 +35,6 @@ hardening:
   # etcd encryption
   etcdEncryption:
     # Enable etcd encryption by patching the existing APIServer resource
-    enabled: true
+    enabled: false
     # Encryption type: aescbc, aesgcm, or kms v2
     type: "aescbc"
