@@ -1,4 +1,4 @@
-{{- if .Values.hardening.etcdEncryption.enabled }}
+{{- if eq .Values.hardening.etcdEncryption.enabled true }}
 apiVersion: config.openshift.io/v1
 kind: APIServer
 metadata:
